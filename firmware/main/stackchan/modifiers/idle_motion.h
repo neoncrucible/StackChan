@@ -44,7 +44,7 @@ public:
         uint32_t now = GetHAL().millis();
 
         // 如果时间没到，直接跳过
-        if (now < _next_tick) {
+        if (static_cast<int32_t>(now - _next_tick) < 0) {
             return;
         }
 
@@ -75,8 +75,8 @@ private:
 
         if (action < 50) {
             // 【动作 1：随意环视】使用归一化坐标 (-1.0 ~ 1.0)
-            float target_x = Random::getInstance().getFloat(-0.4f, 0.4f);   // 左右看
-            float target_y = Random::getInstance().getFloat(-0.95f, 0.2f);  // 上下看
+            float target_x = Random::getInstance().getFloat(-0.25f, 0.25f);   // 左右看
+            float target_y = Random::getInstance().getFloat(-0.5f, 0.1f);  // 上下看
             int speed      = Random::getInstance().getInt(150, 300);
 
             // mclog::info("action 1: look at normalized ({}, {}) in speed {}", target_x, target_y, speed);
@@ -96,9 +96,9 @@ private:
             motion.moveWithSpeed(target_yaw, target_pitch, speed);
         } else if (action < 90) {
             // 【动作 3：快速撇一眼】速度快，跨度中等
-            int target_yaw   = Random::getInstance().getInt(-500, 500);
+            int target_yaw   = Random::getInstance().getInt(-300, 300);
             int target_pitch = Random::getInstance().getInt(100, 400);
-            int speed        = Random::getInstance().getInt(250, 400);
+            int speed        = Random::getInstance().getInt(180, 260);
 
             // mclog::info("action 3: quick glance to ({}, {}) in speed {}", target_yaw, target_pitch, speed);
             motion.moveWithSpeed(target_yaw, target_pitch, speed);

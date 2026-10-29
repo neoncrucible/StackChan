@@ -145,17 +145,16 @@ void Hal::xiaozhi_board_init()
 static void _stackchan_update_task(void* param)
 {
     bool is_setup_done = false;
+    TickType_t last_wake = xTaskGetTickCount();
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // Keep the same cadence while listening and speaking. In particular,
+        // never sleep while holding the LVGL lock.
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
 
         tools::update_reminders();
 
         LvglLockGuard lock;
-
-        if (!hal_bridge::is_xiaozhi_idle()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
 
         GetStackChan().update();
 

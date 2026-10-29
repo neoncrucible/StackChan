@@ -1,0 +1,37 @@
+name: PHOSPHOR build
+on:
+  workflow_dispatch:
+  push:
+    branches: ["phosphor/**"]
+    paths: ["firmware/**", "tools/**", ".github/workflows/phosphor.yml"]
+permissions:
+  contents: read
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Focused host checks
+        run: |
+          cmake -S firmware/tests -B /tmp/phosphor-tests -DCMAKE_BUILD_TYPE=Debug
+          cmake --build /tmp/phosphor-tests -j4
+          ctest --test-dir /tmp/phosphor-tests --output-on-failure
+      - name: Install pinned ESP-IDF
+        run: |
+          git clone --depth 1 --branch v5.5.4 --recursive --shallow-submodules --jobs 8 https://github.com/espressif/esp-idf.git "$RUNNER_TEMP/esp-idf"
+          "$RUNNER_TEMP/esp-idf/install.sh" esp32s3
+      - name: Build and package
+        shell: bash
+        run: |
+          source "$RUNNER_TEMP/esp-idf/export.sh"
+          python3 firmware/fetch_repos.py
+          cd firmware
+          idf.py build
+          cd ..
+          python3 tools/package.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: phosphor-cores3-candidate
+          path: dist/PHOSPHOR-CoreS3.zip
+          if-no-files-found: error

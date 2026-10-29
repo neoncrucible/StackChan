@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "servo.h"
+#include <algorithm>
 #include <hal/hal.h>
 
 using namespace uitk;
@@ -38,14 +39,16 @@ void Servo::init()
 void Servo::update()
 {
     // Keep update in at most 50Hz
-    if (GetHAL().millis() - _last_tick < 20) {
+    const uint32_t elapsed = GetHAL().millis() - _last_tick;
+    if (elapsed < 20) {
         return;
     }
     _last_tick = GetHAL().millis();
 
     // Apply animation
     if (!_angle_anim.done()) {
-        _angle_anim.updateWithDelta(0.02f);  // Fixed delta time for consistency
+        // Follow elapsed time without a large jump after a long scheduling gap.
+        _angle_anim.updateWithDelta(std::min(elapsed, uint32_t{60}) / 1000.0f);
         set_angle_impl(static_cast<int>(_angle_anim.directValue()));
     }
 
@@ -56,9 +59,10 @@ void Servo::update()
     }
 
     // Auto release torque on rest
-    else if (_auto_torque_release_enabled && !isMoving()) {
+    else if (_auto_torque_release_enabled) {
+        // Poll resting servos five times a second, not every display frame.
         if (GetHAL().millis() - _last_torque_check_tick > 200) {
-            if (getTorqueEnabled()) {
+            if (!isMoving() && getTorqueEnabled()) {
                 setTorqueEnabled(false);
             }
             _last_torque_check_tick = GetHAL().millis();
@@ -109,7 +113,7 @@ void Servo::update_angle_anim_target(int angle)
 {
     angle = uitk::clamp(angle, _angle_limit.x, _angle_limit.y);
 
-    if (_auto_angle_sync_enabled) {
+    if (_auto_angle_sync_enabled && _angle_anim.done()) {
         _angle_anim.teleport(getCurrentAngle());  // Use current angle as start
     }
     _angle_anim             = angle;  // Apply new target

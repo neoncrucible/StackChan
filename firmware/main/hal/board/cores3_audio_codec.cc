@@ -3,8 +3,30 @@
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/i2s_tdm.h>
+#include <esp_timer.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <algorithm>
+#include <cstring>
+#include <phosphor/audio_meter.h>
 
 #define TAG "CoreS3AudioCodec"
+
+// A transient I2C error must not reboot the whole robot. Retry locally, then
+// back off so a disconnected codec cannot monopolise an audio task.
+static bool open_codec(esp_codec_dev_handle_t dev, esp_codec_dev_sample_info_t* info,
+                       int64_t& retry_at) {
+    if (esp_timer_get_time() < retry_at) return false;
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        const int err = esp_codec_dev_open(dev, info);
+        if (err == ESP_CODEC_DEV_OK) { retry_at = 0; return true; }
+        ESP_LOGW(TAG, "Codec open attempt %d failed: %d", attempt + 1, err);
+        esp_codec_dev_close(dev);
+        if (attempt != 2) vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(20)));
+    }
+    retry_at = esp_timer_get_time() + 500000;
+    return false;
+}
 
 CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rate, int output_sample_rate,
     gpio_num_t mclk, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din,
@@ -77,9 +99,9 @@ CoreS3AudioCodec::CoreS3AudioCodec(void* i2c_master_handle, int input_sample_rat
 }
 
 CoreS3AudioCodec::~CoreS3AudioCodec() {
-    ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
     esp_codec_dev_delete(output_dev_);
-    ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
     esp_codec_dev_delete(input_dev_);
 
     audio_codec_delete_codec_if(in_codec_if_);
@@ -183,11 +205,12 @@ void CoreS3AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
 }
 
 void CoreS3AudioCodec::SetOutputVolume(int volume) {
-    ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, volume));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_set_out_vol(output_dev_, volume));
     AudioCodec::SetOutputVolume(volume);
 }
 
 void CoreS3AudioCodec::EnableInput(bool enable) {
+    input_requested_ = enable;
     if (enable == input_enabled_) {
         return;
     }
@@ -202,15 +225,16 @@ void CoreS3AudioCodec::EnableInput(bool enable) {
         if (input_reference_) {
             fs.channel_mask |= ESP_CODEC_DEV_MAKE_CHANNEL_MASK(1);
         }
-        ESP_ERROR_CHECK(esp_codec_dev_open(input_dev_, &fs));
-        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
+        if (!open_codec(input_dev_, &fs, input_retry_at_)) return;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
     } else {
-        ESP_ERROR_CHECK(esp_codec_dev_close(input_dev_));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(input_dev_));
     }
     AudioCodec::EnableInput(enable);
 }
 
 void CoreS3AudioCodec::EnableOutput(bool enable) {
+    output_requested_ = enable;
     if (enable == output_enabled_) {
         return;
     }
@@ -223,24 +247,33 @@ void CoreS3AudioCodec::EnableOutput(bool enable) {
             .sample_rate = (uint32_t)output_sample_rate_,
             .mclk_multiple = 0,
         };
-        ESP_ERROR_CHECK(esp_codec_dev_open(output_dev_, &fs));
-        ESP_ERROR_CHECK(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
+        if (!open_codec(output_dev_, &fs, output_retry_at_)) return;
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_set_out_vol(output_dev_, output_volume_));
     } else {
-        ESP_ERROR_CHECK(esp_codec_dev_close(output_dev_));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_close(output_dev_));
     }
     AudioCodec::EnableOutput(enable);
 }
 
 int CoreS3AudioCodec::Read(int16_t* dest, int samples) {
-    if (input_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(input_dev_, (void*)dest, samples * sizeof(int16_t)));
+    if (!dest || samples <= 0) return 0;
+    if (!input_enabled_ && input_requested_) EnableInput(true);
+    if (!input_enabled_ || esp_codec_dev_read(input_dev_, dest, samples * sizeof(int16_t)) != ESP_CODEC_DEV_OK) {
+        // Never send uninitialised samples into the AFE after a codec fault.
+        std::memset(dest, 0, samples * sizeof(int16_t));
+        const int ms = samples * 1000 / std::max(1, input_sample_rate_ * input_channels_);
+        vTaskDelay(std::max<TickType_t>(1, pdMS_TO_TICKS(ms)));
     }
     return samples;
 }
 
 int CoreS3AudioCodec::Write(const int16_t* data, int samples) {
-    if (output_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)));
+    if (!data || samples <= 0) return 0;
+    if (!output_enabled_ && output_requested_) EnableOutput(true);
+    if (output_enabled_ && esp_codec_dev_write(output_dev_, (void*)data, samples * sizeof(int16_t)) == ESP_CODEC_DEV_OK) {
+        phosphor::publish_audio(data, samples, static_cast<uint32_t>(esp_timer_get_time() / 1000));
+    } else {
+        phosphor::output_level.store(0, std::memory_order_relaxed);
     }
     return samples;
 }

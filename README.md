@@ -1,32 +1,42 @@
-# StackChan Open-Source
+# PHOSPHOR
 
-<img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
+A fresh voice companion for the **M5Stack StackChan K151 / CoreS3**. Original green terminal avatar, local smooth head motion and stock-compatible streaming voice. No external sensors, camera features or desktop server.
 
-Here are StackChan related open-source resources, including source code of the StackChan firmware, remote controller firmware, mobile app (iOS and Android), and server. 
+![PHOSPHOR native avatar](docs/phosphor-avatar.png)
 
-Update of this repo could be a little late than the released firmware and mobile app. 
+This is a custom application on M5Stack's maintained hardware and Xiaozhi voice foundation. It contains no Kadence application code. General conversation still uses Wi-Fi and the configured cloud service; PHOSPHOR is not an offline general-purpose LLM.
 
-----
+- **Voice first:** removes a 100 ms sleep inside the display lock during conversation; bounded blocking UART reads; quieter idle movement; local codec recovery.
+- **Native face:** no face bitmap or GIF, capped at 25 Hz with speaker-amplitude mouth motion. Motor loop requests 50 Hz. Hardware timing is not yet measured.
+- **Focused controls:** voice and setup apps, stock onboarding, calibration, power management and built-in touch. Camera initialisation and unused applications are removed from the active build.
+- **Predictable updates:** exact dependency commits, required patches, one candidate version. Automatic stock firmware replacement is disabled.
 
-<img src="https://cdn.shopify.com/s/files/1/0056/7689/2250/files/5a589623895f65487717894d9240f6b8.png" width="60%">
+[Research and design decisions](docs/research.md) · [All observed recent releases](docs/release-catalogue.md) · [Build comparison and validation](docs/validation.md) · [Flashing and one acceptance pass](docs/FLASH.md)
 
-**StackChan is a super kawaii AI desktop robot co-created by M5Stack and the user community.** It uses the M5Stack **flagship IoT development kit [CoreS3](https://docs.m5stack.com/en/core/CoreS3)** as its main controller, powered by an ESP32-S3 SoC featuring a 240 MHz dual-core processor, with 16MB Flash and 8MB PSRAM onboard, and supporting Wi-Fi and BLE. The main unit also integrates a 2.0-inch capacitive touch display with a high-strength glass cover, a 0.3 MP camera, a proximity & ambient light sensor, a 9-axis IMU (accelerometer + gyroscope + magnetometer), a microSD card slot, a 1W speaker, dual microphones, and power/reset buttons. 
+## Build
 
-The **robot body**, connected to the main unit, includes a USB-C interface for power and data, a 550 mAh battery, two feedback servos (360-degree continuous rotation on the horizontal axis and 90-degree movement on the vertical axis), two rows totaling 12 RGB LEDs, infrared transmitter and receiver, a three-zone touch panel, and a full-featured NFC module. 
+Use **ESP-IDF v5.5.4**, target ESP32-S3. From an activated IDF shell:
 
-The **factory firmware** is feature-rich, including an AI Agent, lively and expressive animations, ESP-NOW wireless remote control, and online app downloads. It can connect to a mobile app for video viewing, remote avatar control, and more, and also supports online updates (OTA). The product also supports programming via Arduino, UiFlow2, and other methods, and can connect to various expansion units in the M5Stack ecosystem, making it easy to implement a wide range of custom functions. 
+```sh
+python3 firmware/fetch_repos.py
+cd firmware
+idf.py build
+cd ..
+python3 tools/package.py
+```
 
-> ⚠️ Do not forcibly rotate any movable parts connected to the motors by hand when you are unsure whether the motors are powered and under control, as this may cause hardware damage. 
+The package is `dist/PHOSPHOR-CoreS3.zip`. It contains segmented flash images, checksums and a backup-first flashing helper. It does not contain credentials. Do not use it on Core2, AtomS3R or a bare CoreS3 without the StackChan base.
 
-- Purchase link: [M5Stack Official Store](https://shop.m5stack.com/products/stackchan-kawaii-co-created-open-source-ai-desktop-robot) | [淘宝 Taobao](https://item.taobao.com/item.htm?id=1042238294510)
+Focused host checks:
 
-- Product document page: [English](https://docs.m5stack.com/en/StackChan) | [日本語](https://docs.m5stack.com/ja/StackChan) | [中文](https://docs.m5stack.com/zh_CN/StackChan)
+```sh
+cmake -S firmware/tests -B /tmp/phosphor-tests -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/phosphor-tests -j4
+ctest --test-dir /tmp/phosphor-tests --output-on-failure
+```
 
-- Board support package: https://github.com/m5stack/StackChan-BSP
+The GitHub workflow builds one artifact; it does not publish releases. Local firmware compilation and all four host checks passed. **Physical flashing, voice latency and servo smoothness remain to be verified on the robot.**
 
-Thank you to the contributors of the StackChan community, especially: 
+## Provenance
 
-| ![](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/avatar_stack_chan.jpg) | ![](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/avatar_takao.jpg) |
-| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [@stack_chan](https://x.com/stack_chan)                                          | [@mongonta555](https://x.com/mongonta555)                                   |
-| Shinya Ishikawa                                                                  | Takao Akaki                                                                 |
+Stock base: [m5stack/StackChan](https://github.com/m5stack/StackChan/tree/f901cc2969189f3f0e96af1442c0f96e77e1e2c1). Original file licence notices remain in place. New PHOSPHOR code is MIT licensed; third-party components keep their own licences. [THIRD_PARTY.md](THIRD_PARTY.md) records design references. The repository is firmware-focused; stock phone/server/remote source is available in the upstream project.

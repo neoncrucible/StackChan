@@ -77,81 +77,41 @@ void SCSerial::end()
 	}
 }
 
-int SCSerial::readSCS(unsigned char *nDat, int nLen, unsigned long TimeOut)
-{
-	if (uart_num >= UART_NUM_MAX) {
-		return 0;
-	}
-
-	int size = 0;
-	int64_t t_begin = esp_timer_get_time() / 1000;
-
-	while (1) {
-		size_t available = 0;
-		uart_get_buffered_data_len(uart_num, &available);
-
-		if (available > 0) {
-			unsigned char byte;
-			int len = uart_read_bytes(uart_num, &byte, 1, 0);
-			if (len > 0) {
-				if (nDat) {
-					nDat[size] = byte;
-				}
-				size++;
-			}
-		}
-
-		if (size >= nLen) {
-			break;
-		}
-
-		if ((esp_timer_get_time() / 1000) - t_begin > static_cast<int64_t>(TimeOut)) {
-			break;
-		}
-
-		vTaskDelay(pdMS_TO_TICKS(1));
-	}
-
-	return size;
+namespace {
+// Read in the driver, which yields the CPU while the UART is silent. A 1 ms
+// vTaskDelay rounds to zero with the stock 100 Hz tick and can starve audio.
+// Preserve the protocol's two timeout modes: whole request and inter-byte.
+int read_bounded(uart_port_t port, unsigned char* data, int length,
+                 unsigned long timeout_ms, bool inter_byte) {
+    if (port >= UART_NUM_MAX || length <= 0) return 0;
+    int size = 0;
+    int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+    while (size < length) {
+        const int64_t remaining_us = deadline - esp_timer_get_time();
+        // An explicit zero timeout still allows already buffered bytes.
+        TickType_t wait = 0;
+        if (remaining_us > 0) {
+            wait = pdMS_TO_TICKS((remaining_us + 999) / 1000);
+            if (wait == 0) wait = 1;
+        }
+        unsigned char byte;
+        const int got = uart_read_bytes(port, &byte, 1, wait);
+        if (got <= 0) break;
+        if (data) data[size] = byte;
+        ++size;
+        if (inter_byte) deadline = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000;
+        else if (esp_timer_get_time() >= deadline) break;
+    }
+    return size;
+}
 }
 
-int SCSerial::readSCS(unsigned char *nDat, int nLen)
-{
-	if (uart_num >= UART_NUM_MAX) {
-		return 0;
-	}
+int SCSerial::readSCS(unsigned char* data, int length, unsigned long timeout_ms) {
+    return read_bounded(uart_num, data, length, timeout_ms, false);
+}
 
-	int size = 0;
-	int64_t t_begin = esp_timer_get_time() / 1000;
-
-	while (1) {
-		size_t available = 0;
-		uart_get_buffered_data_len(uart_num, &available);
-
-		if (available > 0) {
-			unsigned char byte;
-			int len = uart_read_bytes(uart_num, &byte, 1, 0);
-			if (len > 0) {
-				if (nDat) {
-					nDat[size] = byte;
-				}
-				size++;
-				t_begin = esp_timer_get_time() / 1000;
-			}
-		}
-
-		if (size >= nLen) {
-			break;
-		}
-
-		if ((esp_timer_get_time() / 1000) - t_begin > static_cast<int64_t>(IOTimeOut)) {
-			break;
-		}
-
-		vTaskDelay(pdMS_TO_TICKS(1));
-	}
-
-	return size;
+int SCSerial::readSCS(unsigned char* data, int length) {
+    return read_bounded(uart_num, data, length, IOTimeOut, true);
 }
 
 int SCSerial::writeSCS(unsigned char *nDat, int nLen)

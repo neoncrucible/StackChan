@@ -1,5 +1,5 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..e67514b 100644
+index d69d43d..22e359e 100644
 --- a/main/application.cc
 +++ b/main/application.cc
 @@ -1,14 +1,15 @@
@@ -32,8 +32,22 @@ index d69d43d..e67514b 100644
  
      auto& board = Board::GetInstance();
      while (true) {
-@@ -441,15 +443,18 @@ void Application::CheckNewVersion() {
+@@ -432,6 +434,7 @@ void Application::CheckNewVersion() {
+         retry_count = 0;
+         retry_delay = 10; // Reset retry delay
  
++#ifndef CONFIG_PHOSPHOR_MANUAL_UPDATES
+         if (ota_->HasNewVersion()) {
+             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
+                 return; // This line will never be reached after reboot
+@@ -439,17 +442,24 @@ void Application::CheckNewVersion() {
+             // If upgrade failed, continue to normal operation
+         }
+ 
++#else
++        if (ota_->HasNewVersion()) ESP_LOGI(TAG, "Stock update available; PHOSPHOR uses manual firmware updates");
++#endif
++
          // No new version, mark the current version as valid
          ota_->MarkCurrentVersionValid();
 -        if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
@@ -55,7 +69,7 @@ index d69d43d..e67514b 100644
          }
  
          // This will block the loop until the activation is done or timeout
-@@ -609,36 +614,6 @@ void Application::InitializeProtocol() {
+@@ -609,36 +619,6 @@ void Application::InitializeProtocol() {
      protocol_->Start();
  }
  
@@ -92,7 +106,7 @@ index d69d43d..e67514b 100644
  void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
      ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
      auto display = Board::GetInstance().GetDisplay();
-@@ -716,8 +691,13 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+@@ -716,8 +696,13 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
          return;
      }
  
@@ -106,7 +120,7 @@ index d69d43d..e67514b 100644
              return;
          }
      }
-@@ -825,8 +805,13 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+@@ -825,8 +810,13 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
          return;
      }
  
@@ -120,7 +134,7 @@ index d69d43d..e67514b 100644
              audio_service_.EnableWakeWordDetection(true);
              return;
          }
-@@ -1116,4 +1101,3 @@ void Application::ResetProtocol() {
+@@ -1116,4 +1106,3 @@ void Application::ResetProtocol() {
          protocol_.reset();
      });
  }
@@ -416,3 +430,33 @@ index 1e5d687..dbcc91d 100644
      bool has_serial_number_ = false;
      bool has_activation_challenge_ = false;
      std::string current_version_;
+diff --git a/main/protocols/mqtt_protocol.cc b/main/protocols/mqtt_protocol.cc
+index 94d9d12..8060ee9 100644
+--- a/main/protocols/mqtt_protocol.cc
++++ b/main/protocols/mqtt_protocol.cc
+@@ -321,8 +321,8 @@ std::string MqttProtocol::GetHelloMessage() {
+ 
+ void MqttProtocol::ParseServerHello(const cJSON* root) {
+     auto transport = cJSON_GetObjectItem(root, "transport");
+-    if (transport == nullptr || strcmp(transport->valuestring, "udp") != 0) {
+-        ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
++    if (!cJSON_IsString(transport) || transport->valuestring == nullptr || strcmp(transport->valuestring, "udp") != 0) {
++        ESP_LOGE(TAG, "Missing or unsupported transport in server hello");
+         return;
+     }
+ 
+diff --git a/main/protocols/websocket_protocol.cc b/main/protocols/websocket_protocol.cc
+index f0cc034..5f677ee 100644
+--- a/main/protocols/websocket_protocol.cc
++++ b/main/protocols/websocket_protocol.cc
+@@ -227,8 +227,8 @@ std::string WebsocketProtocol::GetHelloMessage() {
+ 
+ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
+     auto transport = cJSON_GetObjectItem(root, "transport");
+-    if (transport == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
+-        ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
++    if (!cJSON_IsString(transport) || transport->valuestring == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
++        ESP_LOGE(TAG, "Missing or unsupported transport in server hello");
+         return;
+     }
+ 

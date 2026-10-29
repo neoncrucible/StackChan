@@ -1,5 +1,12 @@
 menu "StackChan Server"
 
+config PHOSPHOR_MANUAL_UPDATES
+    bool "Keep PHOSPHOR firmware until a manual update"
+    default y
+    help
+        Keep the cloud activation/configuration lookup, but do not automatically
+        install the provider's stock firmware over this custom build.
+
 config STACKCHAN_SERVER_URL
     string "StackChan server base URL"
     default "http://47.113.125.164:12800"
