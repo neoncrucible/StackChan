@@ -467,8 +467,9 @@ void StackChanAvatarDisplay::SetTheme(Theme* theme)
 }
 
 #include <hal/board/hal_bridge.h>
-static bool _is_xiaozhi_ready = false;
-static bool _is_xiaozhi_idle  = false;
+#include <atomic>
+static std::atomic<bool> _is_xiaozhi_ready{false};
+static std::atomic<bool> _is_xiaozhi_idle{false};
 bool hal_bridge::is_xiaozhi_ready()
 {
     return _is_xiaozhi_ready;

@@ -776,6 +776,12 @@ StackChanCamera* hal_bridge::board_get_camera()
     return camera;
 }
 
+bool hal_bridge::board_get_battery_status(int& level, bool& charging)
+{
+    bool discharging = false;
+    return Board::GetInstance().GetBatteryLevel(level, charging, discharging);
+}
+
 int hal_bridge::board_get_battery_level()
 {
     auto& board      = Board::GetInstance();

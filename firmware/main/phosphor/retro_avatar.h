@@ -39,6 +39,8 @@ private:
     uint32_t owned_since_ = 0;
     bool motion_owned_ = false;
     bool alert_active_ = false;
+    bool nod_pending_ = false;
+    uint32_t reply_ended_ = 0;
     unsigned idle_cycle_ = 0;
     std::string idle_line_;
     void updateCompanion(uint32_t now);

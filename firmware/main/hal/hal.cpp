@@ -186,7 +186,8 @@ void Hal::startXiaozhi()
     motion.setAutoTorqueReleaseEnabled(true);
 
     // Start stackchan update task
-    xTaskCreatePinnedToCore(_stackchan_update_task, "stackchan", 4096, NULL, 3, NULL, 1);
+    // Reminder serialization/NVS runs here; reserve 2 KiB beyond the old UI stack.
+    xTaskCreatePinnedToCore(_stackchan_update_task, "stackchan", 6144, NULL, 3, NULL, 1);
 
     hal_bridge::start_xiaozhi_app();
 }

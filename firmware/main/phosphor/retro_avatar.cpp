@@ -112,12 +112,13 @@ void RetroAvatar::setState(State state) {
     state_ = state;
     state_since_ = GetHAL().millis();
     info_tick_ = state_since_ - 1000;
+    if (previous == State::Speaking) {
+        nod_pending_ = idle_level_ > 0;
+        reply_ended_ = state_since_;
+    }
     if (state != State::Ready) {
         cancelGesture();
         leftEye().setPosition({0, 0}); rightEye().setPosition({0, 0});
-    }
-    else if (previous == State::Speaking && idle_level_ > 0) {
-        gesture("nod");
     }
     const char* label = "READY";
     switch (state) {
@@ -175,7 +176,7 @@ void RetroAvatar::update() {
 }
 
 void RetroAvatar::showReminders() {
-    if (state_ != State::Ready) return;
+    if (state_ == State::Listening || state_ == State::Speaking) return;
     pauseGestures();
     if (!reminder_panel_) reminder_panel_ = std::make_unique<ReminderPanel>(panel_->get());
 }
@@ -205,10 +206,16 @@ bool RetroAvatar::gesture(std::string_view name) {
 void RetroAvatar::updateCompanion(uint32_t now) {
     if (reminder_panel_) {
         reminder_panel_->update();
-        if (reminder_panel_->done() || state_ != State::Ready) reminder_panel_.reset();
+        if (reminder_panel_->done() || state_ == State::Listening || state_ == State::Speaking)
+            reminder_panel_.reset();
     }
     if (motion_owned_ && now - owned_since_ > 3500) motion_owned_ = false;
+    if (nod_pending_ && now - reply_ended_ > 15000) nod_pending_ = false;
     if (state_ == State::Ready && !reminder_panel_ && !alert_active_ && getEmotion() != Emotion::Sleepy) {
+        if (nod_pending_) {
+            nod_pending_ = false;
+            if (idle_level_ > 0) gesture("nod");
+        }
         Pose pose;
         if (gesture_.next(now, pose)) {
             auto& motion = GetStackChan().motion();
@@ -229,10 +236,11 @@ void RetroAvatar::updateCompanion(uint32_t now) {
         time_t now_time = time(nullptr); struct tm local{}; localtime_r(&now_time, &local);
         char clock[16] = "--:--";
         if (now_time >= clock_epoch) strftime(clock, sizeof(clock), "%H:%M", &local);
-        int battery = hal_bridge::board_get_battery_level();
+        int battery = -1; bool charging = false;
+        const bool battery_valid = hal_bridge::board_get_battery_status(battery, charging);
         std::string next = std::string(clock) + "   BAT " +
-            (battery >= 0 && battery <= 100 ? std::to_string(battery) + "%" : "--") +
-            (hal_bridge::board_is_battery_charging() ? " +" : "");
+            (battery_valid && battery >= 0 && battery <= 100 ? std::to_string(battery) + "%" : "--") +
+            (battery_valid && charging ? " +" : "");
         auto reminders = tools::get_active_reminders();
         if (reminders.empty()) next += "\nReady when you are.";
         else if (now_time < clock_epoch) next += "\nClock unset / reminders waiting";
@@ -249,7 +257,8 @@ void RetroAvatar::updateCompanion(uint32_t now) {
         lv_obj_add_flag(idle_text_, LV_OBJ_FLAG_HIDDEN);
         _key_elements.speechBubble->setVisible(true);
     }
-    if (state_ == State::Ready) lv_obj_remove_flag(reminder_button_, LV_OBJ_FLAG_HIDDEN);
+    if (state_ != State::Listening && state_ != State::Speaking)
+        lv_obj_remove_flag(reminder_button_, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(reminder_button_, LV_OBJ_FLAG_HIDDEN);
 }
 
