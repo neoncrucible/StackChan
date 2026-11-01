@@ -35,8 +35,12 @@ cmake --build /tmp/phosphor-tests -j4
 ctest --test-dir /tmp/phosphor-tests --output-on-failure
 ```
 
-The GitHub workflow builds one artifact; it does not publish releases. Local firmware compilation and all four host checks passed. **Physical flashing, voice latency and servo smoothness remain to be verified on the robot.**
+The GitHub workflow runs five focused host checks and compiles the complete firmware before packaging one artifact; it does not publish releases. See the workflow on the exact source commit for its build result. **The 1.1 changes still need physical acceptance on the robot.** The earlier 1.0 measurements are retained in `docs/validation.md` as a baseline.
 
 ## Provenance
 
 Stock base: [m5stack/StackChan](https://github.com/m5stack/StackChan/tree/f901cc2969189f3f0e96af1442c0f96e77e1e2c1). Original file licence notices remain in place. New PHOSPHOR code is MIT licensed; third-party components keep their own licences. [THIRD_PARTY.md](THIRD_PARTY.md) records design references. The repository is firmware-focused; stock phone/server/remote source is available in the upstream project.
+
+## Companion update — 1.1
+
+[What changes and how to use it](docs/COMPANION.md): a terminal startup/home screen, idle clock/battery/next reminder, eight persistent reminders with snooze, and coordinated gestures. [Cloud personality setting](docs/PERSONALITY.md) completes the character configuration. Wake recognition remains the stock trained model; “Phosphor” is the device/persona name, not a claimed new acoustic detector.

@@ -21,11 +21,8 @@ public:
 
 private:
     std::unique_ptr<view::LauncherView> _view;
-    std::unique_ptr<view::Screensaver> _screensaver;
     std::unique_ptr<setup_workers::WorkerBase> _startup_worker;
-    uint32_t _screensaver_timecount = 0;
     bool _startup_checked           = false;
 
     void create_launcher_view();
-    void screensaver_update();
 };

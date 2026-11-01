@@ -21,6 +21,7 @@
 #include "stackchan_camera.h"
 #include "hal_bridge.h"
 #include <hal/hal.h>
+#include <apps/common/reminder/reminder.h>
 
 #define TAG "M5Stack-StackChan-Board"
 
@@ -467,7 +468,11 @@ private:
             GetDisplay()->SetPowerSaveMode(false);
             GetBacklight()->RestoreBrightness();
         });
-        power_save_timer_->OnShutdownRequest([this]() { pmic_->PowerOff(); });
+        power_save_timer_->OnShutdownRequest([this]() {
+            // A saved reminder should not be defeated by the idle-off timer.
+            // Explicit power-off and low-battery protection remain in control.
+            if (!tools::reminders_need_power()) pmic_->PowerOff();
+        });
         RefreshPowerState();
     }
 
@@ -738,6 +743,12 @@ public:
         WifiBoard::SetPowerSaveLevel(level);
     }
 
+    void WakeDisplay()
+    {
+        if (power_save_timer_) power_save_timer_->WakeUp();
+        GetBacklight()->RestoreBrightness();
+    }
+
     virtual Backlight* GetBacklight() override
     {
         static CustomBacklight backlight(pmic_);
@@ -789,6 +800,11 @@ bool hal_bridge::board_is_battery_charging()
     } else {
         return false;
     }
+}
+
+void hal_bridge::board_wake_display()
+{
+    static_cast<M5StackCoreS3Board&>(Board::GetInstance()).WakeDisplay();
 }
 
 void hal_bridge::board_set_backlight_brightness(uint8_t brightness, bool permanent)

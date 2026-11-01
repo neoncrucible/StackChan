@@ -3,9 +3,11 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 
 namespace phosphor {
 enum class State { Ready, Listening, Speaking, Connecting, Notice };
+enum class Expression { Neutral, Happy, Sad, Angry, Curious, Sleepy };
 constexpr uint32_t background = 0x07120e;
 constexpr uint32_t dim = 0x183e2a;
 constexpr uint32_t green = 0xa4ff7c;
@@ -15,6 +17,7 @@ struct Face {
     int look_x = 0, look_y = 0;
     int mouth = 0;
     State state = State::Ready;
+    Expression expression = Expression::Neutral;
     bool operator==(const Face&) const = default;
 };
 
@@ -42,12 +45,27 @@ template<class Rect> void draw_face(const Face& f, Rect rect) {
         // Cutout gives each eye a squared, old terminal cursor shape.
         if (h > 8) rect(x + 8, y + 4, 28, h - 8, background);
         rect(x + (side ? 2 : 34), y + h - 4, 8, 4, ink);
+        // Block brows keep expressions readable without sprite assets.
+        if (f.expression == Expression::Angry) {
+            rect(x, side ? 35 : 31, 20, 3, ink);
+            rect(x + 24, side ? 31 : 35, 20, 3, ink);
+        } else if (f.expression == Expression::Curious && side == 0) {
+            rect(x, 29, 44, 3, ink);
+        } else if (f.expression == Expression::Sad) {
+            rect(x, side ? 30 : 34, 20, 2, ink);
+            rect(x + 24, side ? 34 : 30, 20, 2, ink);
+        }
     }
     constexpr int shape[] = {2, 3, 5, 7, 9, 7, 5, 3, 2};
     const int level = std::clamp(f.mouth, 0, 100);
     for (int i = 0; i < 9; ++i) {
         const int h = 2 + shape[i] * level / 30;
-        rect(76 + i * 12, 113 - h / 2, 8, h, ink);
+        int curve = 0;
+        if (f.state != State::Speaking && f.expression == Expression::Happy)
+            curve = 5 - std::abs(4 - i) * 2;
+        else if (f.state != State::Speaking && f.expression == Expression::Sad)
+            curve = std::abs(4 - i) * 2 - 5;
+        rect(76 + i * 12, 113 + curve - h / 2, 8, h, ink);
     }
     if (f.state == State::Listening) {
         rect(116, 22, 4, 4, ink); rect(126, 18, 4, 8, ink); rect(136, 22, 4, 4, ink);

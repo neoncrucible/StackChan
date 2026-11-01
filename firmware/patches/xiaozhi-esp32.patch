@@ -369,6 +369,32 @@ index 7ee973c..8de99db 100644
  
      /**
       * WiFi connection timeout callback
+diff --git a/main/mcp_server.cc b/main/mcp_server.cc
+index 7cd7ba0..04b090b 100644
+--- a/main/mcp_server.cc
++++ b/main/mcp_server.cc
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "mcp_server.h"
++#include <phosphor/personality.h>
+ #include <esp_log.h>
+ #include <esp_app_desc.h>
+ #include <algorithm>
+@@ -395,6 +396,13 @@ void McpServer::ParseMessage(const cJSON* json) {
+         std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
+         message += app_desc->version;
+         message += "\"}}";
++        // Standard MCP InitializeResult instructions. Providers may ignore these;
++        // the same profile is supplied for their agent-role configuration.
++        auto* result = cJSON_Parse(message.c_str());
++        cJSON_AddStringToObject(result, "instructions", phosphor::personality);
++        char* serialized = cJSON_PrintUnformatted(result);
++        if (serialized) { message = serialized; cJSON_free(serialized); }
++        cJSON_Delete(result);
+         ReplyResult(id_int, message);
+     } else if (method_str == "tools/list") {
+         std::string cursor_str = "";
 diff --git a/main/ota.cc b/main/ota.cc
 index bcc0dc5..e6792e3 100644
 --- a/main/ota.cc

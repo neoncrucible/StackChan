@@ -10,6 +10,7 @@
 #include <apps/apps.h>
 #include <hal/hal.h>
 #include <settings.h>
+#include <phosphor/companion_service.h>
 
 using namespace mooncake;
 using namespace smooth_ui_toolkit;
@@ -53,6 +54,7 @@ extern "C" void app_main(void)
         while (1) {
             GetHAL().feedTheDog();
             GetHAL().updateHeapStatusLog();
+            phosphor::update_companion();
 
             GetMooncake().update();
 

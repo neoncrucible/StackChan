@@ -27,7 +27,7 @@ def main():
         shutil.copy2(source, target)
         data = target.read_bytes()
         segments.append({"offset": offset, "file": target.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
-    manifest = {"name": "PHOSPHOR", "version": "1.0.0-phosphor", "chip": "esp32s3",
+    manifest = {"name": "PHOSPHOR", "version": "1.1.0-phosphor", "chip": "esp32s3",
                 "hardware": "M5Stack StackChan K151 / CoreS3", "flash_bytes": 16 * 1024 * 1024,
                 "source_commit": revision, "source_url": f"https://github.com/neoncrucible/StackChan/tree/{revision}",
                 "idf": "v5.5.4", "hardware_tested": False, "segments": segments}
@@ -36,6 +36,8 @@ def main():
     shutil.copy2(ROOT / "tools/flash.py", output / "flash.py")
     shutil.copy2(ROOT / "docs/FLASH.md", output / "FLASH.md")
     shutil.copy2(ROOT / "THIRD_PARTY.md", output / "THIRD_PARTY.md")
+    shutil.copy2(ROOT / "docs/COMPANION.md", output / "COMPANION.md")
+    shutil.copy2(ROOT / "docs/PERSONALITY.md", output / "PERSONALITY.md")
     # Licence texts travel with the binary distribution. Source stays in Git.
     licence_roots = [("registry", ROOT / "firmware/managed_components"),
                      ("components", ROOT / "firmware/components"),

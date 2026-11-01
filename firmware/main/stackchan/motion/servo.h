@@ -37,6 +37,9 @@ public:
      */
     void move(int angle);
 
+    // Hold the last commanded position without a feedback round trip.
+    void pauseAnimation() { stop_motion_at_angle(static_cast<int>(_angle_anim.directValue())); }
+
     /**
      * @brief Move to angle with custom spring params
      *

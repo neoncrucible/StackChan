@@ -32,3 +32,8 @@ foreach(tick_hz 100 1000)
     target_compile_features(servo_uart_${tick_hz} PRIVATE cxx_std_17)
     add_test(NAME servo_uart_${tick_hz} COMMAND servo_uart_${tick_hz})
 endforeach()
+
+add_executable(companion_test companion_test.cpp)
+target_include_directories(companion_test PRIVATE ../main)
+target_compile_features(companion_test PRIVATE cxx_std_20)
+add_test(NAME companion COMMAND companion_test)

@@ -260,6 +260,8 @@ void StackChanAvatarDisplay::SetupUI()
             return;
         }
 
+        auto& retro = static_cast<phosphor::RetroAvatar&>(GetStackChan().avatar());
+        if (retro.panelOpen()) return;
         if (hal_bridge::is_xiaozhi_ready()) {
             last_toggle_tick = now;
             hal_bridge::toggle_xiaozhi_chat_state();
@@ -280,6 +282,7 @@ void StackChanAvatarDisplay::SetupUI()
 
     auto config        = hal_bridge::get_xiaozhi_config();
     idle_motion_level_ = config.idleRandomMovementLevel;
+    static_cast<phosphor::RetroAvatar&>(stackchan.avatar()).setIdleMotionLevel(idle_motion_level_);
 
     ESP_LOGI(TAG, "Avatar created and started");
 }
@@ -359,9 +362,8 @@ void StackChanAvatarDisplay::SetEmotion(const char* emotion)
             idle_expression_modifier_id_ = -1;
         }
 
-        // Return to default pose
-        auto& motion = GetStackChan().motion();
-        motion.pitchServo().moveWithSpeed(0, 80);
+        // Sleep keeps the head still instead of moving to a mechanical limit.
+        static_cast<phosphor::RetroAvatar&>(avatar).pauseGestures(30000);
 
     } else if (strcmp(emotion, "doubtful") == 0) {
         avatar.setEmotion(Emotion::Doubt);
@@ -534,39 +536,13 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         avatar.setSpeech(status);
     }
 
-    if (is_idle) {
-        // Start idle motion
-        ESP_LOGW(TAG, "Start idle motion");
-        if (idle_motion_modifier_id_ < 0) {
-            if (idle_motion_level_ > 0) {
-                CreateIdleMotionModifier();
-            }
-            idle_expression_modifier_id_ = stackchan.addModifier(std::make_unique<IdleExpressionModifier>());
-        }
-
-        _is_xiaozhi_idle = true;
-    } else {
-        // Stop idle motion
-        ESP_LOGW(TAG, "Stop idle motion");
-        if (idle_motion_modifier_id_ >= 0) {
-            stackchan.removeModifier(idle_motion_modifier_id_);
-            idle_motion_modifier_id_ = -1;
-            stackchan.removeModifier(idle_expression_modifier_id_);
-            idle_expression_modifier_id_ = -1;
-        }
-
-        // if (!is_listening) {
-        //     // Return to default pose
-        //     motion.pitchServo().moveWithSpeed(200, 350);
-        //     motion.yawServo().moveWithSpeed(0, 350);
-        // }
-
-        _is_xiaozhi_idle = false;
-    }
+    // PHOSPHOR owns one bounded gesture sequence; no competing idle modifiers.
+    _is_xiaozhi_idle = is_idle;
 
     // Clear sleep state
     if (is_sleeping_) {
         avatar.setSpeech("");
+        is_sleeping_ = false;
     }
 }
 

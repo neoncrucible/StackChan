@@ -1,8 +1,8 @@
 # PHOSPHOR — one candidate, one acceptance pass
 
-Target: **M5Stack StackChan K151 with CoreS3, ESP32-S3, 16 MB flash**. This is not for Core2, AtomS3R or a bare CoreS3 without the StackChan servo base. Candidate version: **1.0.0-phosphor**.
+Target: **M5Stack StackChan K151 with CoreS3, ESP32-S3, 16 MB flash**. This is not for Core2, AtomS3R or a bare CoreS3 without the StackChan servo base. Candidate version: **1.1.0-phosphor**.
 
-The firmware compiled successfully and passed its focused host checks. It has **not been physically tested on your robot**. No device is attached to the build environment.
+The downloadable candidate is packaged only after a full firmware build and five focused host checks. The 1.1 changes have **not been physically tested on your robot**. No device is attached to the build environment.
 
 ## Flash
 
@@ -24,6 +24,8 @@ python flash.py --port COM7 --dry-run
 ```
 
 ## First use
+
+Read `COMPANION.md` for the idle screen, reminders and gestures. `PERSONALITY.md` contains the one-time cloud agent role setting. The new name is Phosphor; wake recognition still uses the stock model.
 
 PHOSPHOR keeps stock StackChan provisioning and compatible cloud activation. Existing valid configuration should be reused; otherwise use the usual StackChan app setup flow. After configuration, the voice app starts by default. Setup remains available through the on-screen home control. No local Kadence service, Docker stack or computer voice gateway is required.
 

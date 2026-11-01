@@ -8,6 +8,9 @@
 #include <mcp_server.h>
 #include <stackchan/stackchan.h>
 #include <apps/common/common.h>
+#include <phosphor/retro_avatar.h>
+#include <phosphor/personality.h>
+#include <ctime>
 
 using namespace stackchan;
 
@@ -58,6 +61,8 @@ void Hal::xiaozhi_mcp_init()
 
                            LvglLockGuard lock;
 
+                           if (GetStackChan().hasAvatar())
+                               static_cast<phosphor::RetroAvatar&>(GetStackChan().avatar()).pauseGestures();
                            auto& motion = GetStackChan().motion();
                            if (pitch != -9999) {
                                motion.pitchServo().moveWithSpeed(pitch * 10, speed);
@@ -94,11 +99,14 @@ void Hal::xiaozhi_mcp_init()
 
     mclog::tagInfo(_tag, "add robot.create_reminder tool");
     mcp_server.AddTool("self.robot.create_reminder",
-                       "Create a reminder. Duration is in seconds. Message is what to say when time is up. Set repeat "
-                       "to true to repeat the reminder.",
+                       "Save a reminder on this robot (maximum eight). Shows text and plays a chime; does not speak the message. "
+                       "Use duration_seconds for a countdown, or at_unix for an absolute Unix UTC time. "
+                       "For local dates consult get_reminders for device time and timezone first. "
+                       "repeat repeats every duration_seconds (minimum 60). Report errors; never claim an unsaved reminder is set.",
                        PropertyList({Property("duration_seconds", kPropertyTypeInteger, 60, 1, 86400),
                                      Property("message", kPropertyTypeString, std::string("Time's up!")),
-                                     Property("repeat", kPropertyTypeBoolean, false)}),
+                                     Property("repeat", kPropertyTypeBoolean, false),
+                                     Property("at_unix", kPropertyTypeInteger, 0, 0, INT32_MAX)}),
                        [this](const PropertyList& properties) -> ReturnValue {
                            int duration_seconds = properties["duration_seconds"].value<int>();
                            std::string message  = properties["message"].value<std::string>();
@@ -112,7 +120,8 @@ void Hal::xiaozhi_mcp_init()
                            mclog::tagInfo(_tag, "create_reminder: duration={}s, message={}, repeat={}",
                                           duration_seconds, message, repeat);
 
-                           int id = tools::create_reminder(duration_seconds * 1000, message, repeat);
+                           int id = tools::create_reminder_at(properties["at_unix"].value<int>(), duration_seconds * 1000, message, repeat);
+                           if (id < 0) return std::string(tools::reminder_error(id));
 
                            return id;
                        });
@@ -122,19 +131,24 @@ void Hal::xiaozhi_mcp_init()
                        [this](const PropertyList& properties) -> ReturnValue {
                            mclog::tagInfo(_tag, "get_reminders");
                            auto reminders          = tools::get_active_reminders();
-                           std::string result_json = "[";
-                           for (size_t i = 0; i < reminders.size(); ++i) {
-                               const auto& r = reminders[i];
-                               result_json +=
-                                   fmt::format(R"({{"id": {}, "duration_ms": {}, "message": "{}", "repeat": {}}})",
-                                               r.id, r.durationMs, r.message, r.repeat ? "true" : "false");
-                               if (i < reminders.size() - 1) {
-                                   result_json += ", ";
-                               }
+                           auto* result = cJSON_CreateObject();
+                           const time_t now = time(nullptr);
+                           cJSON_AddNumberToObject(result, "now_unix", now);
+                           struct tm local{}; localtime_r(&now, &local);
+                           char stamp[64]; strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S %z", &local);
+                           cJSON_AddStringToObject(result, "local_time", stamp);
+                           cJSON_AddStringToObject(result, "timezone", GetHAL().getTimezone().c_str());
+                           auto* array = cJSON_AddArrayToObject(result, "reminders");
+                           for (const auto& r : reminders) {
+                               auto* entry = cJSON_CreateObject();
+                               cJSON_AddNumberToObject(entry, "id", r.id);
+                               cJSON_AddNumberToObject(entry, "due_unix", static_cast<double>(r.dueUnix));
+                               cJSON_AddNumberToObject(entry, "remaining_seconds", r.remainingSeconds);
+                               cJSON_AddNumberToObject(entry, "repeat_seconds", r.durationMs / 1000);
+                               cJSON_AddStringToObject(entry, "message", r.message.c_str());
+                               cJSON_AddItemToArray(array, entry);
                            }
-                           result_json += "]";
-                           mclog::tagInfo(_tag, "get_reminders result: {}", result_json);
-                           return result_json;
+                           return result;
                        });
 
     mclog::tagInfo(_tag, "add robot.stop_reminder tool");
@@ -143,7 +157,17 @@ void Hal::xiaozhi_mcp_init()
                        [this](const PropertyList& properties) -> ReturnValue {
                            int id = properties["id"].value<int>();
                            mclog::tagInfo(_tag, "stop_reminder: id={}", id);
-                           tools::stop_reminder(id);
-                           return true;
+                           return tools::stop_reminder(id);
                        });
+    mcp_server.AddTool("self.robot.get_character",
+        "Read PHOSPHOR's character and capability guidance. Use when establishing the robot persona.",
+        std::vector<Property>{}, [](const PropertyList&) -> ReturnValue { return std::string(phosphor::personality); });
+    mcp_server.AddTool("self.robot.gesture", "Perform a small nod, shake or curious tilt when idle. "
+        "Returns false if busy or paused. Do not repeat requests during speech.",
+        PropertyList({Property("name", kPropertyTypeString)}), [](const PropertyList& p) -> ReturnValue {
+            LvglLockGuard lock;
+            if (!GetStackChan().hasAvatar()) return false;
+            return static_cast<phosphor::RetroAvatar&>(GetStackChan().avatar()).gesture(p["name"].value<std::string>());
+        });
+
 }

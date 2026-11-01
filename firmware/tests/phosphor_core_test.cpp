@@ -8,9 +8,12 @@
 int main() {
     using namespace phosphor;
     // Render every state at the extremes that modifiers and audio can produce.
+    for (auto expression : {Expression::Neutral, Expression::Happy, Expression::Sad,
+                            Expression::Angry, Expression::Curious, Expression::Sleepy}) {
     for (auto state : {State::Ready, State::Listening, State::Speaking, State::Connecting, State::Notice}) {
         for (int level : {0, 50, 100}) {
             Face f{level, 100 - level, -100, 100, level, state};
+            f.expression = expression;
             int count = 0;
             draw_face(f, [&](int x, int y, int w, int h, uint32_t) {
                 assert(x >= 0 && y >= 0 && w > 0 && h > 0);
@@ -19,6 +22,7 @@ int main() {
             });
             assert(count < 64);
         }
+    }
     }
     int16_t silence[128]{};
     int16_t extremes[]{-32768, 32767, -32768, 32767};

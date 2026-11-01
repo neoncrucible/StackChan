@@ -50,7 +50,6 @@ void AppLauncher::onLauncherRunning()
         }
     } else {
         _view->update();
-        screensaver_update();
     }
 
     GetStackChan().update();
@@ -78,25 +77,4 @@ void AppLauncher::create_launcher_view()
         mclog::tagInfo(getAppInfo().name, "handle open app, app id: {}", appID);
         openApp(appID);
     };
-}
-
-void AppLauncher::screensaver_update()
-{
-    const uint32_t SCREENSAVER_TIMEOUT_MS = 30000;
-
-    uint32_t idle_time = lv_display_get_inactive_time(NULL);
-    if (idle_time >= SCREENSAVER_TIMEOUT_MS) {
-        if (!_screensaver) {
-            _screensaver = std::make_unique<view::Screensaver>();
-            _screensaver->init();
-        }
-    } else if (_screensaver) {
-        _screensaver.reset();
-    }
-
-    // Update in 30ms interval
-    if (_screensaver && GetHAL().millis() - _screensaver_timecount > 30) {
-        _screensaver_timecount = GetHAL().millis();
-        _screensaver->update();
-    }
 }
