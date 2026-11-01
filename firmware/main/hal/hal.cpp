@@ -7,6 +7,7 @@
 #include <memory>
 #include <mooncake_log.h>
 #include <nvs_flash.h>
+#include <phosphor/companion_service.h>
 
 static std::unique_ptr<Hal> _hal_instance;
 static const std::string_view _tag = "HAL";
@@ -40,6 +41,7 @@ void Hal::init()
     imu_init();
     servo_init();
     lvgl_init();
+    phosphor::init_companion();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -145,17 +147,16 @@ void Hal::xiaozhi_board_init()
 static void _stackchan_update_task(void* param)
 {
     bool is_setup_done = false;
+    TickType_t last_wake = xTaskGetTickCount();
 
     while (1) {
-        vTaskDelay(pdMS_TO_TICKS(20));
+        // Keep the same cadence while listening and speaking. In particular,
+        // never sleep while holding the LVGL lock.
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(20));
 
-        tools::update_reminders();
+        phosphor::update_companion();
 
         LvglLockGuard lock;
-
-        if (!hal_bridge::is_xiaozhi_idle()) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-        }
 
         GetStackChan().update();
 
@@ -184,20 +185,9 @@ void Hal::startXiaozhi()
     motion.setAutoAngleSyncEnabled(true);
     motion.setAutoTorqueReleaseEnabled(true);
 
-    // Setup reminder handler
-    tools::on_reminder_triggered().clear();
-    tools::on_reminder_triggered().connect([](int id, std::string_view msg) {
-        mclog::tagInfo(_tag, "reminder triggered: id: {}, msg: {}", id, msg);
-        {
-            LvglLockGuard lock;
-            auto& avatar = GetStackChan().avatar();
-            avatar.addDecorator(std::make_unique<view::ReminderView>(lv_screen_active(), msg));
-        }
-        hal_bridge::app_play_sound(OGG_NEW_NOTIFICATION);
-    });
-
     // Start stackchan update task
-    xTaskCreatePinnedToCore(_stackchan_update_task, "stackchan", 4096, NULL, 3, NULL, 1);
+    // Reminder serialization/NVS runs here; reserve 2 KiB beyond the old UI stack.
+    xTaskCreatePinnedToCore(_stackchan_update_task, "stackchan", 6144, NULL, 3, NULL, 1);
 
     hal_bridge::start_xiaozhi_app();
 }

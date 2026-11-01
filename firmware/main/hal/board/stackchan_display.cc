@@ -17,6 +17,7 @@
 #include <stackchan/stackchan.h>
 #include <assets/lang_config.h>
 #include <hal/hal.h>
+#include <phosphor/retro_avatar.h>
 
 using namespace stackchan;
 using namespace stackchan::avatar;
@@ -86,7 +87,7 @@ StackChanAvatarDisplay::StackChanAvatarDisplay(esp_lcd_panel_io_handle_t panel_i
     current_theme_         = LvglThemeManager::GetInstance().GetTheme(theme_name);
 
     // Draw white screen
-    std::vector<uint16_t> buffer(width_, 0xFFFF);
+    std::vector<uint16_t> buffer(width_, 0x0000);
     for (int y = 0; y < height_; y++) {
         esp_lcd_panel_draw_bitmap(panel_, 0, y, width_, y + 1, buffer.data());
     }
@@ -109,11 +110,10 @@ StackChanAvatarDisplay::StackChanAvatarDisplay(esp_lcd_panel_io_handle_t panel_i
     // lv image cache, currently only PNG is supported
     size_t psram_size_mb = esp_psram_get_size() / 1024 / 1024;
     if (psram_size_mb >= 8) {
-        lv_image_cache_resize(2 * 1024 * 1024, true);
-        ESP_LOGI(TAG, "Use 2MB of PSRAM for image cache");
+        lv_image_cache_resize(64 * 1024, true);
+        ESP_LOGI(TAG, "Use 64KB of PSRAM for setup image cache; face uses native rectangles");
     } else if (psram_size_mb >= 2) {
-        lv_image_cache_resize(512 * 1024, true);
-        ESP_LOGI(TAG, "Use 512KB of PSRAM for image cache");
+        lv_image_cache_resize(64 * 1024, true);
     }
 #endif
 
@@ -251,15 +251,17 @@ void StackChanAvatarDisplay::SetupUI()
 
     ESP_LOGI(TAG, "Creating Stack-chan Avatar...");
 
-    auto avatar = std::make_unique<DefaultAvatar>();
+    auto avatar = std::make_unique<phosphor::RetroAvatar>();
     avatar->init(lv_screen_active());
     avatar->getPanel()->onClick().connect([]() {
         static uint32_t last_toggle_tick = 0;
         const uint32_t now               = GetHAL().millis();
-        if (last_toggle_tick != 0 && now - last_toggle_tick < 2000) {
+        if (last_toggle_tick != 0 && now - last_toggle_tick < 300) {
             return;
         }
 
+        auto& retro = static_cast<phosphor::RetroAvatar&>(GetStackChan().avatar());
+        if (retro.panelOpen()) return;
         if (hal_bridge::is_xiaozhi_ready()) {
             last_toggle_tick = now;
             hal_bridge::toggle_xiaozhi_chat_state();
@@ -267,10 +269,9 @@ void StackChanAvatarDisplay::SetupUI()
     });
 
     stackchan.attachAvatar(std::move(avatar));
-    stackchan.addModifier(std::make_unique<BreathModifier>());
     blink_modifier_id_ = stackchan.addModifier(std::make_unique<BlinkModifier>());
-    stackchan.addModifier(std::make_unique<HeadPetModifier>());
-    stackchan.addModifier(std::make_unique<ImuEventModifier>());
+    // Keep the terminal skin asset-free: no stock pet/shake bitmap decorators
+    // or involuntary large gestures during a voice reply.
 
     preview_image_ = lv_image_create(lv_screen_active());
     lv_obj_set_size(preview_image_, 320, 240);
@@ -281,6 +282,7 @@ void StackChanAvatarDisplay::SetupUI()
 
     auto config        = hal_bridge::get_xiaozhi_config();
     idle_motion_level_ = config.idleRandomMovementLevel;
+    static_cast<phosphor::RetroAvatar&>(stackchan.avatar()).setIdleMotionLevel(idle_motion_level_);
 
     ESP_LOGI(TAG, "Avatar created and started");
 }
@@ -360,9 +362,8 @@ void StackChanAvatarDisplay::SetEmotion(const char* emotion)
             idle_expression_modifier_id_ = -1;
         }
 
-        // Return to default pose
-        auto& motion = GetStackChan().motion();
-        motion.pitchServo().moveWithSpeed(0, 80);
+        // Sleep keeps the head still instead of moving to a mechanical limit.
+        static_cast<phosphor::RetroAvatar&>(avatar).pauseGestures(30000);
 
     } else if (strcmp(emotion, "doubtful") == 0) {
         avatar.setEmotion(Emotion::Doubt);
@@ -466,8 +467,9 @@ void StackChanAvatarDisplay::SetTheme(Theme* theme)
 }
 
 #include <hal/board/hal_bridge.h>
-static bool _is_xiaozhi_ready = false;
-static bool _is_xiaozhi_idle  = false;
+#include <atomic>
+static std::atomic<bool> _is_xiaozhi_ready{false};
+static std::atomic<bool> _is_xiaozhi_idle{false};
 bool hal_bridge::is_xiaozhi_ready()
 {
     return _is_xiaozhi_ready;
@@ -488,12 +490,16 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
     }
 
     auto& avatar = stackchan.avatar();
-    auto& motion = stackchan.motion();
-
     DisplayLockGuard lock(this);
 
     bool is_idle      = false;
-    bool is_listening = false;
+
+    auto& retro = static_cast<phosphor::RetroAvatar&>(avatar);
+    if (strcmp(status, Lang::Strings::LISTENING) == 0) retro.setState(phosphor::State::Listening);
+    else if (strcmp(status, Lang::Strings::SPEAKING) == 0) retro.setState(phosphor::State::Speaking);
+    else if (strcmp(status, Lang::Strings::STANDBY) == 0) retro.setState(phosphor::State::Ready);
+    else if (strcmp(status, Lang::Strings::CONNECTING) == 0) retro.setState(phosphor::State::Connecting);
+    else retro.setState(phosphor::State::Notice);
 
     if (strcmp(status, Lang::Strings::LISTENING) == 0) {
         if (speaking_modifier_id_ >= 0) {
@@ -522,9 +528,8 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         GetHAL().refreshRgb();
 
     } else if (strcmp(status, Lang::Strings::SPEAKING) == 0) {
-        if (speaking_modifier_id_ < 0) {
-            speaking_modifier_id_ = stackchan.addModifier(std::make_unique<SpeakingModifier>(0, 180, false));
-        }
+        // Mouth amplitude comes from the speaker PCM, through an atomic meter.
+        // No random speaking animation or motor gesture competes with audio.
 
         GetHAL().setRgbColor(0, 0, 0, 50);
         GetHAL().refreshRgb();
@@ -532,39 +537,13 @@ void StackChanAvatarDisplay::SetStatus(const char* status)
         avatar.setSpeech(status);
     }
 
-    if (is_idle) {
-        // Start idle motion
-        ESP_LOGW(TAG, "Start idle motion");
-        if (idle_motion_modifier_id_ < 0) {
-            if (idle_motion_level_ > 0) {
-                CreateIdleMotionModifier();
-            }
-            idle_expression_modifier_id_ = stackchan.addModifier(std::make_unique<IdleExpressionModifier>());
-        }
-
-        _is_xiaozhi_idle = true;
-    } else {
-        // Stop idle motion
-        ESP_LOGW(TAG, "Stop idle motion");
-        if (idle_motion_modifier_id_ >= 0) {
-            stackchan.removeModifier(idle_motion_modifier_id_);
-            idle_motion_modifier_id_ = -1;
-            stackchan.removeModifier(idle_expression_modifier_id_);
-            idle_expression_modifier_id_ = -1;
-        }
-
-        // if (!is_listening) {
-        //     // Return to default pose
-        //     motion.pitchServo().moveWithSpeed(200, 350);
-        //     motion.yawServo().moveWithSpeed(0, 350);
-        // }
-
-        _is_xiaozhi_idle = false;
-    }
+    // PHOSPHOR owns one bounded gesture sequence; no competing idle modifiers.
+    _is_xiaozhi_idle = is_idle;
 
     // Clear sleep state
     if (is_sleeping_) {
         avatar.setSpeech("");
+        is_sleeping_ = false;
     }
 }
 

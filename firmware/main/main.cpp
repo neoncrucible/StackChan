@@ -9,6 +9,8 @@
 #include <mooncake.h>
 #include <apps/apps.h>
 #include <hal/hal.h>
+#include <settings.h>
+#include <phosphor/companion_service.h>
 
 using namespace mooncake;
 using namespace smooth_ui_toolkit;
@@ -22,28 +24,37 @@ extern "C" void app_main(void)
     // HAL init
     GetHAL().init();
 
+    // Adopt the fresh build's defaults once; retain Wi-Fi, binding, volume and
+    // calibrated servo zeros. Later user changes in setup remain respected.
+    {
+        Settings settings("phosphor", true);
+        if (!settings.GetBool("initialized", false)) {
+            auto config = GetHAL().getXiaozhiConfig();
+            config.startAiAgentOnBoot = true;
+            config.idleRandomMovementLevel = 1;
+            GetHAL().setXiaozhiConfig(config);
+            settings.SetBool("initialized", true);
+        }
+    }
+
     // Setup ui hal
     ui_hal::on_delay([](uint32_t ms) { GetHAL().delay(ms); });
     ui_hal::on_get_tick([]() { return GetHAL().millis(); });
 
     const bool skip_mooncake =
-        GetHAL().getXiaozhiConfig().startAiAgentOnBoot && GetHAL().getWarmRebootTarget() < 0;
+        GetHAL().isAppConfiged() && GetHAL().getXiaozhiConfig().startAiAgentOnBoot && GetHAL().getWarmRebootTarget() < 0;
 
     if (!skip_mooncake) {
         // Install apps
         GetMooncake().installApp(std::make_unique<AppLauncher>());
         GetMooncake().installApp(std::make_unique<AppAiAgent>());
-        GetMooncake().installApp(std::make_unique<AppAvatar>());
-        GetMooncake().installApp(std::make_unique<AppEspnowControl>());
-        GetMooncake().installApp(std::make_unique<AppAppCenter>());
-        GetMooncake().installApp(std::make_unique<AppEzdata>());
-        GetMooncake().installApp(std::make_unique<AppDance>());
         GetMooncake().installApp(std::make_unique<AppSetup>());
 
         // Main loop
         while (1) {
             GetHAL().feedTheDog();
             GetHAL().updateHeapStatusLog();
+            phosphor::update_companion();
 
             GetMooncake().update();
 

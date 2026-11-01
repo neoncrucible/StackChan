@@ -1,0 +1,2 @@
+# Unified diffs legitimately contain a context marker on otherwise blank lines.
+*.patch -whitespace

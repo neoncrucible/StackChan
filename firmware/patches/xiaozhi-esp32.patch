@@ -1,11 +1,79 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..3b6f07e 100644
+index d69d43d..22e359e 100644
 --- a/main/application.cc
 +++ b/main/application.cc
-@@ -610,33 +610,36 @@ void Application::InitializeProtocol() {
+@@ -1,14 +1,15 @@
+ #include "application.h"
++#include <hal/hal.h>
++#include "assets.h"
++#include "assets/lang_config.h"
++#include "audio_codec.h"
+ #include "board.h"
+ #include "display.h"
+-#include "system_info.h"
+-#include "audio_codec.h"
+-#include "mqtt_protocol.h"
+-#include "websocket_protocol.h"
+-#include "assets/lang_config.h"
+ #include "mcp_server.h"
+-#include "assets.h"
++#include "mqtt_protocol.h"
+ #include "settings.h"
++#include "system_info.h"
++#include "websocket_protocol.h"
+ 
+ #include <cstring>
+ #include <esp_log.h>
+@@ -399,6 +400,7 @@ void Application::CheckNewVersion() {
+     const int MAX_RETRY = 10;
+     int retry_count = 0;
+     int retry_delay = 10; // Initial retry delay in seconds
++    int challenge_rounds = 0;
+ 
+     auto& board = Board::GetInstance();
+     while (true) {
+@@ -432,6 +434,7 @@ void Application::CheckNewVersion() {
+         retry_count = 0;
+         retry_delay = 10; // Reset retry delay
+ 
++#ifndef CONFIG_PHOSPHOR_MANUAL_UPDATES
+         if (ota_->HasNewVersion()) {
+             if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
+                 return; // This line will never be reached after reboot
+@@ -439,17 +442,24 @@ void Application::CheckNewVersion() {
+             // If upgrade failed, continue to normal operation
+         }
+ 
++#else
++        if (ota_->HasNewVersion()) ESP_LOGI(TAG, "Stock update available; PHOSPHOR uses manual firmware updates");
++#endif
++
+         // No new version, mark the current version as valid
+         ota_->MarkCurrentVersionValid();
+-        if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
++        if (ota_->RequiresAppBinding()) {
++            GetHAL().requestAppSetup();
++        }
++        if (!ota_->HasActivationChallenge()) {
+             // Exit the loop if done checking new version
+             break;
+         }
+ 
+         display->SetStatus(Lang::Strings::ACTIVATION);
+-        // Activation code is shown to the user and waiting for the user to input
+-        if (ota_->HasActivationCode()) {
+-            ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
++        // Retain automatic device authentication, with a bounded retry budget.
++        if (++challenge_rounds > 3) {
++            GetHAL().requestAppSetup();
+         }
+ 
+         // This will block the loop until the activation is done or timeout
+@@ -609,36 +619,6 @@ void Application::InitializeProtocol() {
+     protocol_->Start();
  }
  
- void Application::ShowActivationCode(const std::string& code, const std::string& message) {
+-void Application::ShowActivationCode(const std::string& code, const std::string& message) {
 -    struct digit_sound {
 -        char digit;
 -        const std::string_view& sound;
@@ -33,39 +101,56 @@ index d69d43d..3b6f07e 100644
 -            audio_service_.PlaySound(it->sound);
 -        }
 -    }
-+    // struct digit_sound {
-+    //     char digit;
-+    //     const std::string_view& sound;
-+    // };
-+    // static const std::array<digit_sound, 10> digit_sounds{{
-+    //     digit_sound{'0', Lang::Sounds::OGG_0},
-+    //     digit_sound{'1', Lang::Sounds::OGG_1}, 
-+    //     digit_sound{'2', Lang::Sounds::OGG_2},
-+    //     digit_sound{'3', Lang::Sounds::OGG_3},
-+    //     digit_sound{'4', Lang::Sounds::OGG_4},
-+    //     digit_sound{'5', Lang::Sounds::OGG_5},
-+    //     digit_sound{'6', Lang::Sounds::OGG_6},
-+    //     digit_sound{'7', Lang::Sounds::OGG_7},
-+    //     digit_sound{'8', Lang::Sounds::OGG_8},
-+    //     digit_sound{'9', Lang::Sounds::OGG_9}
-+    // }};
-+
-+    // // This sentence uses 9KB of SRAM, so we need to wait for it to finish
-+    // Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
-+
-+    // for (const auto& digit : code) {
-+    //     auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
-+    //         [digit](const digit_sound& ds) { return ds.digit == digit; });
-+    //     if (it != digit_sounds.end()) {
-+    //         audio_service_.PlaySound(it->sound);
-+    //     }
-+    // }
-+
-+    auto display = Board::GetInstance().GetDisplay();
-+    display->SetChatMessage("system", "Please bind and set up in the mobile app.");
- }
- 
+-}
+-
  void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
+     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
+     auto display = Board::GetInstance().GetDisplay();
+@@ -716,8 +696,13 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
+         return;
+     }
+ 
++    // Leave MAX_MODEM before reusing or establishing the control connection.
++    auto& board = Board::GetInstance();
++    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
++
+     if (!protocol_->IsAudioChannelOpened()) {
+         if (!protocol_->OpenAudioChannel()) {
++            board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+             return;
+         }
+     }
+@@ -825,8 +810,13 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
+         return;
+     }
+ 
++    // The session handshake must not be sent while WiFi is still in MAX_MODEM.
++    auto& board = Board::GetInstance();
++    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
++
+     if (!protocol_->IsAudioChannelOpened()) {
+         if (!protocol_->OpenAudioChannel()) {
++            board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+             audio_service_.EnableWakeWordDetection(true);
+             return;
+         }
+@@ -1116,4 +1106,3 @@ void Application::ResetProtocol() {
+         protocol_.reset();
+     });
+ }
+-
+diff --git a/main/application.h b/main/application.h
+index 7ca7af4..1418901 100644
+--- a/main/application.h
++++ b/main/application.h
+@@ -163,7 +163,6 @@ private:
+     void CheckAssetsVersion();
+     void CheckNewVersion();
+     void InitializeProtocol();
+-    void ShowActivationCode(const std::string& code, const std::string& message);
+     void SetListeningMode(ListeningMode mode);
+     ListeningMode GetDefaultListeningMode() const;
+     
 diff --git a/main/assets.cc b/main/assets.cc
 index ad61944..6b84daf 100644
 --- a/main/assets.cc
@@ -271,3 +356,133 @@ index 7bc917b..874b137 100644
  };
  
  #endif // I2C_DEVICE_H
+diff --git a/main/boards/common/wifi_board.h b/main/boards/common/wifi_board.h
+index 7ee973c..8de99db 100644
+--- a/main/boards/common/wifi_board.h
++++ b/main/boards/common/wifi_board.h
+@@ -29,7 +29,7 @@ protected:
+     /**
+      * Enter WiFi configuration mode
+      */
+-    void StartWifiConfigMode();
++    virtual void StartWifiConfigMode();
+ 
+     /**
+      * WiFi connection timeout callback
+diff --git a/main/mcp_server.cc b/main/mcp_server.cc
+index 7cd7ba0..04b090b 100644
+--- a/main/mcp_server.cc
++++ b/main/mcp_server.cc
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "mcp_server.h"
++#include <phosphor/personality.h>
+ #include <esp_log.h>
+ #include <esp_app_desc.h>
+ #include <algorithm>
+@@ -395,6 +396,13 @@ void McpServer::ParseMessage(const cJSON* json) {
+         std::string message = "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"" BOARD_NAME "\",\"version\":\"";
+         message += app_desc->version;
+         message += "\"}}";
++        // Standard MCP InitializeResult instructions. Providers may ignore these;
++        // the same profile is supplied for their agent-role configuration.
++        auto* result = cJSON_Parse(message.c_str());
++        cJSON_AddStringToObject(result, "instructions", phosphor::personality);
++        char* serialized = cJSON_PrintUnformatted(result);
++        if (serialized) { message = serialized; cJSON_free(serialized); }
++        cJSON_Delete(result);
+         ReplyResult(id_int, message);
+     } else if (method_str == "tools/list") {
+         std::string cursor_str = "";
+diff --git a/main/ota.cc b/main/ota.cc
+index bcc0dc5..e6792e3 100644
+--- a/main/ota.cc
++++ b/main/ota.cc
+@@ -119,19 +119,13 @@ esp_err_t Ota::CheckVersion() {
+         return ESP_ERR_INVALID_RESPONSE;
+     }
+ 
+-    has_activation_code_ = false;
++    requires_app_binding_ = false;
+     has_activation_challenge_ = false;
+     cJSON *activation = cJSON_GetObjectItem(root, "activation");
+     if (cJSON_IsObject(activation)) {
+-        cJSON* message = cJSON_GetObjectItem(activation, "message");
+-        if (cJSON_IsString(message)) {
+-            activation_message_ = message->valuestring;
+-        }
+-        cJSON* code = cJSON_GetObjectItem(activation, "code");
+-        if (cJSON_IsString(code)) {
+-            activation_code_ = code->valuestring;
+-            has_activation_code_ = true;
+-        }
++        // A manual activation response must be completed in StackChan World.
++        // Discard community activation codes and server-provided URL messages.
++        requires_app_binding_ = cJSON_IsString(cJSON_GetObjectItem(activation, "code"));
+         cJSON* challenge = cJSON_GetObjectItem(activation, "challenge");
+         if (cJSON_IsString(challenge)) {
+             activation_challenge_ = challenge->valuestring;
+diff --git a/main/ota.h b/main/ota.h
+index 1e5d687..dbcc91d 100644
+--- a/main/ota.h
++++ b/main/ota.h
+@@ -18,7 +18,7 @@ public:
+     bool HasNewVersion() { return has_new_version_; }
+     bool HasMqttConfig() { return has_mqtt_config_; }
+     bool HasWebsocketConfig() { return has_websocket_config_; }
+-    bool HasActivationCode() { return has_activation_code_; }
++    bool RequiresAppBinding() { return requires_app_binding_; }
+     bool HasServerTime() { return has_server_time_; }
+     bool StartUpgrade(std::function<void(int progress, size_t speed)> callback);
+     static bool Upgrade(const std::string& firmware_url, std::function<void(int progress, size_t speed)> callback);
+@@ -27,18 +27,14 @@ public:
+     const std::string& GetFirmwareVersion() const { return firmware_version_; }
+     const std::string& GetCurrentVersion() const { return current_version_; }
+     const std::string& GetFirmwareUrl() const { return firmware_url_; }
+-    const std::string& GetActivationMessage() const { return activation_message_; }
+-    const std::string& GetActivationCode() const { return activation_code_; }
+     std::string GetCheckVersionUrl();
+ 
+ private:
+-    std::string activation_message_;
+-    std::string activation_code_;
+     bool has_new_version_ = false;
+     bool has_mqtt_config_ = false;
+     bool has_websocket_config_ = false;
+     bool has_server_time_ = false;
+-    bool has_activation_code_ = false;
++    bool requires_app_binding_ = false;
+     bool has_serial_number_ = false;
+     bool has_activation_challenge_ = false;
+     std::string current_version_;
+diff --git a/main/protocols/mqtt_protocol.cc b/main/protocols/mqtt_protocol.cc
+index 94d9d12..8060ee9 100644
+--- a/main/protocols/mqtt_protocol.cc
++++ b/main/protocols/mqtt_protocol.cc
+@@ -321,8 +321,8 @@ std::string MqttProtocol::GetHelloMessage() {
+ 
+ void MqttProtocol::ParseServerHello(const cJSON* root) {
+     auto transport = cJSON_GetObjectItem(root, "transport");
+-    if (transport == nullptr || strcmp(transport->valuestring, "udp") != 0) {
+-        ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
++    if (!cJSON_IsString(transport) || transport->valuestring == nullptr || strcmp(transport->valuestring, "udp") != 0) {
++        ESP_LOGE(TAG, "Missing or unsupported transport in server hello");
+         return;
+     }
+ 
+diff --git a/main/protocols/websocket_protocol.cc b/main/protocols/websocket_protocol.cc
+index f0cc034..5f677ee 100644
+--- a/main/protocols/websocket_protocol.cc
++++ b/main/protocols/websocket_protocol.cc
+@@ -227,8 +227,8 @@ std::string WebsocketProtocol::GetHelloMessage() {
+ 
+ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
+     auto transport = cJSON_GetObjectItem(root, "transport");
+-    if (transport == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
+-        ESP_LOGE(TAG, "Unsupported transport: %s", transport->valuestring);
++    if (!cJSON_IsString(transport) || transport->valuestring == nullptr || strcmp(transport->valuestring, "websocket") != 0) {
++        ESP_LOGE(TAG, "Missing or unsupported transport in server hello");
+         return;
+     }
+ 

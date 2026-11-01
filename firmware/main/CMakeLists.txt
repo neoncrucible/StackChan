@@ -14,7 +14,11 @@ file(GLOB_RECURSE STACK_CHAN_SOURCES
     "stackchan/*.c"
     "stackchan/*.cc"
     "stackchan/*.cpp"
+    "phosphor/*.cpp"
 )
+# The custom build exposes voice and setup only. No remote camera/telepresence,
+# dancing, app store, ESP-NOW remote or EzData application is installed.
+list(FILTER STACK_CHAN_SOURCES EXCLUDE REGEX "apps/(app_avatar|app_dance|app_app_center|app_espnow_control|app_ezdata)/")
 set(STACK_CHAN_INCLUDE_DIRS 
     "."
 )
@@ -297,6 +301,9 @@ idf_component_register(SRCS ${SOURCES}
                         esp_pm
                         esp_psram
                         esp_netif
+                        esp_http_client
+                        mbedtls
+                        json
                         esp_driver_gpio
                         esp_driver_uart
                         esp_driver_spi
